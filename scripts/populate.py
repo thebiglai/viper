@@ -38,15 +38,14 @@ fmt = '%Y%m%d'
 
 VIPER_HOME = '/opt/viper'
 TRIDENT_HOME = '/home/cloudmark/trident_data'
-# Set to yesterday unless the user passed in -d
 DATE = datetime.strptime(args.date, fmt) if args.date else \
     (date.today() - timedelta(1))
 PROJECT = DATE.strftime('%Y%m%d')
 DATA_DIR = os.path.join(TRIDENT_HOME, DATE.strftime('%Y'), DATE.strftime('%m'),
                         DATE.strftime('%d'), 'raw/vfiles')
-# We just reset DATA_DIR to the user supplied path
+# Just reset DATA_DIR to the user supplied path, if present
 DATA_DIR = args.path if args.path else DATA_DIR
-# Make sure we are creating the project in the correct location
+
 if __name__ == '__main__':
     os.chdir(VIPER_HOME)
     # Create a new project from yesterdays date.
