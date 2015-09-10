@@ -16,6 +16,7 @@ import argparse
 import tempfile
 import contextlib
 import tarfile
+import bottle
 
 from zipfile import ZipFile
 from gzip import GzipFile
@@ -31,13 +32,16 @@ from viper.core.database import Database
 from viper.common import network
 from viper.core.ui.commands import Commands
 
+bottle.TEMPLATE_PATH.insert(0,'data/web')
+
+app = application = bottle.Bottle()
 ##
 # User Config
 ##
 
 web_port = 9090
 cuckoo_api = 'http://localhost:8090'
-cuckoo_web = 'http://localhost:9191'
+cuckoo_web = 'http://172.20.6.18:8000'
 
 ##
 # End User Config
@@ -68,7 +72,7 @@ mod_dicts['swf'] = {'decom':'decompress'}
 mod_dicts['virustotal'] = {'scan':'', 'submit':'-s'}
 mod_dicts['xor'] = {'xor':'', 'rot':'-r', 'all':'-a', 'export':'-o'}
 mod_dicts['yara'] = {'scan':'scan -t', 'all': 'scan -a -t'}
-
+mod_dicts['eyara'] = {'scan':'scan', 'all': 'scan -a'}
 
 ##
 # Helper Functions
@@ -89,7 +93,7 @@ def parse(data):
 
 def print_output(output):
     if not output:
-        return '<p class="text-danger">! The command Generated no Output</p>' 
+        return '<p class="text-danger">! The command Generated no Output</p>'
     return_html = ''
     for entry in output:
         # Skip lines that say seesion opened
@@ -125,7 +129,7 @@ def print_output(output):
         else:
             return_html += '<p>{0}</p>'.format(entry['data'])
     return return_html
-    
+
 def parse_text(module_text):
     # String to hold the new text
     set_text = ''
@@ -141,7 +145,7 @@ def parse_text(module_text):
     return set_text
 
 def project_list():
-    # Get a list of projects 
+    # Get a list of projects
     projects_path = os.path.join(os.getcwd(), 'projects')
     p_list = []
     if os.path.exists(projects_path):
@@ -151,7 +155,7 @@ def project_list():
                 p_list.append(project)
     return p_list
 
-# this will allow complex command line parameters to be passed in via the web gui    
+# this will allow complex command line parameters to be passed in via the web gui
 def module_cmdline(cmd_line, file_hash):
     html = ""
     cmd = Commands()
@@ -182,9 +186,9 @@ def module_cmdline(cmd_line, file_hash):
         except:
             html += '<p class="text-danger">We were unable to complete the command {0}</p>'.format(cmd_line)
     __sessions__.close()
-    return html        
-        
-    
+    return html
+
+
 def module_text(cmd_string, file_hash):
     # A lot of commands rely on an open session
     # open a session on the file hash
@@ -207,25 +211,25 @@ def module_text(cmd_string, file_hash):
     __sessions__.close()
     return html
 
-# context manager for file uploader   
+# context manager for file uploader
 @contextlib.contextmanager
 def upload_temp():
     temp_dir = tempfile.mkdtemp()
     yield temp_dir
     shutil.rmtree(temp_dir)
-       
+
 ##
 # Pages
 #
 
 #Returns Static files e.g. CSS / JS
-@get('/static/:path#.+#')
+@app.get('/static/:path#.+#')
 def server_static(path):
-    return static_file(path, root='data/web/static')    
+    return static_file(path, root='data/web/static')
 
 # Index Page
-@route("/")
-@route("/project/<p>")
+@app.route("/")
+@app.route("/project/<p>")
 def landing(p=False):
     contents = {}
     if p in project_list():
@@ -234,7 +238,7 @@ def landing(p=False):
     else:
         __project__.open("../")
         contents['p'] = 'Main'
-    db = Database() 
+    db = Database()
     # Pagination
     # 25 per page
     value = 25
@@ -243,22 +247,22 @@ def landing(p=False):
     page = request.query.page
     if not page:
         page = 0
-    offset = int(page) * int(value) 
-    contents['act_page'] = page   
+    offset = int(page) * int(value)
+    contents['act_page'] = page
     contents['latest'] = db.find('latest', value=value, offset=offset)
     # return the Template
     return template('index.tpl', **contents)
 
 # create Project
-@route("/create", method="POST")
+@app.route("/create", method="POST")
 def add_project():
     project_name = request.forms.get('project').strip()
     __project__.open(project_name)
     redirect('/project/{0}'.format(project_name))
-       
+
 # Info Page for File
-@route("/file/<file_hash>", method="GET")
-@route("/file/<project>/<file_hash>", method="GET")
+@app.route("/file/<file_hash>", method="GET")
+@app.route("/file/<project>/<file_hash>", method="GET")
 def file_info(file_hash, project=False):
     contents = {}
     if project in project_list():
@@ -275,7 +279,7 @@ def file_info(file_hash, project=False):
         __sessions__.new(path)
     except:
         return template('error.tpl', error="{0} Does not match any hash in the Database".format(file_hash))
-    
+
     # Get the file info
     contents['file_info'] = [
                 __sessions__.current.file.name,
@@ -289,9 +293,9 @@ def file_info(file_hash, project=False):
                 __sessions__.current.file.sha256,
                 __sessions__.current.file.sha512,
                 __sessions__.current.file.ssdeep,
-                __sessions__.current.file.crc32                
+                __sessions__.current.file.crc32
                 ]
-                
+
     # Get Any Notes
     note_list = []
     malware = db.find(key='sha256', value=file_hash)
@@ -302,19 +306,19 @@ def file_info(file_hash, project=False):
             for note in notes:
                 note_list.append([note.title, note.body, note.id])
     contents['notes'] = note_list
-    
+
     # Close the session
     __sessions__.close()
     # Return the page
     return template('file.tpl', **contents)
-    
+
 # Add New File
 # Uses Context Manager to Remove Temp files
-@route('/add', method='POST')
+@app.route('/add', method='POST')
 def add_file():
     tags = request.forms.get('tag_list')
     uploads = request.files.getlist('file')
-    
+
     # Set Project
     project = request.forms.get('project')
     if project in project_list():
@@ -322,7 +326,7 @@ def add_file():
     else:
         __project__.open('../')
         project = 'Main'
-    db = Database()    
+    db = Database()
     file_list = []
     # Write temp file to disk
     with upload_temp() as temp_dir:
@@ -335,7 +339,7 @@ def add_file():
                 zip_pass = request.forms.get('zip_pass')
                 try:
                     with ZipFile(file_path) as zf:
-                        zf.extractall(temp_dir, pwd=zip_pass)            
+                        zf.extractall(temp_dir, pwd=zip_pass)
                     for root, dirs, files in os.walk(temp_dir, topdown=False):
                         for name in files:
                             if not name == upload.filename:
@@ -380,7 +384,7 @@ def add_file():
             # Non zip files
             elif request.forms.get('compression') == 'none':
                 file_list.append(file_path)
-            
+
         # Add each file
         for new_file in file_list:
             print new_file
@@ -395,7 +399,7 @@ def add_file():
     redirect("/project/{0}".format(project))
 
 #add file from url
-@route('/URLDownload', method='POST')
+@app.route('/URLDownload', method='POST')
 def url_download():
     url = request.forms.get('url')
     tags = request.forms.get('tag_list')
@@ -431,8 +435,8 @@ def url_download():
 
 
 # File Download
-@route("/get/<file_hash>", method="GET")
-@route("/get/<project>/<file_hash>", method="GET")
+@app.route("/get/<file_hash>", method="GET")
+@app.route("/get/<project>/<file_hash>", method="GET")
 def file_download(file_hash, project=False):
     if project in project_list():
         __project__.open(project)
@@ -445,7 +449,7 @@ def file_download(file_hash, project=False):
     rows = db.find(key='sha256', value=file_hash)
     if not rows:
         return template('error.tpl', error="{0} Does not match any hash in the Database".format(file_hash))
-        
+
     path = get_sample_path(rows[0].sha256)
     if not path:
         return template('error.tpl', error="File not found on disk")
@@ -456,9 +460,9 @@ def file_download(file_hash, project=False):
     for chunk in File(path).get_chunks():
         data += chunk
     return data
-    
+
 # Search
-@route('/search', method='POST')
+@app.route('/search', method='POST')
 def find_file():
     key = request.forms.get('key')
     value = request.forms.get('term').lower()
@@ -479,7 +483,7 @@ def find_file():
             projects.append('../')
         else:
             projects.append(curr_project)
-    
+
     # Search each Project in the list
     for project in projects:
         __project__.open(project)
@@ -493,22 +497,22 @@ def find_file():
                 project = 'Main'
             proj_results.append([row.name, row.sha256])
         results[project] = proj_results
- 
+
     return template('search.tpl', results=results)
 
 
 # Tags
-@route('/tags', method='GET')
-@route('/tags/<tag_action>', method='POST')    
+@app.route('/tags', method='GET')
+@app.route('/tags/<tag_action>', method='POST')
 def tags(tag_action=False):
     # Set DB
     db = Database()
-    
+
     # Search or Delete
     if request.method == 'GET':
         action = request.query.action
         value = request.query.value.strip()
-        
+
         if value:
             if action == 'search':
                 # This will search all projects
@@ -536,8 +540,8 @@ def tags(tag_action=False):
                 return template('search.tpl', projects=p_list, results=results)
             else:
                 return template('error.tpl', error="'{0}' Is not a valid tag action".format(action))
-                             
-    # Add / Delete                        
+
+    # Add / Delete
     if request.method == 'POST':
         file_hash = request.forms.get('sha256')
         project = request.forms.get('project')
@@ -552,7 +556,7 @@ def tags(tag_action=False):
         redirect('/file/{0}/{1}'.format(project, file_hash))
 
 # Notes Add, Update, Delete
-@route('/file/notes', method='POST')
+@app.route('/file/notes', method='POST')
 def file_notes():
     db = Database()
     update = request.forms.get('update')
@@ -563,7 +567,7 @@ def file_notes():
     note_id = request.forms.get('id')
     note_sha = request.forms.get('sha256')
     project = request.forms.get('project')
-    
+
     # Delete Note
     if delete and note_id:
         db.delete_note(note_id)
@@ -573,11 +577,11 @@ def file_notes():
     if new and note_sha and note_title and note_body:
         db.add_note(note_sha, note_title, note_body)
     redirect('/file/{0}/{1}#notes'.format(project, note_sha))
-        
+
 
 # Return Output from Module.
-@route('/file/module', method='POST')
-def run_module():      
+@app.route('/file/module', method='POST')
+def run_module():
     # Get the hash of the file we want to run a command against
     file_hash = request.forms.get('file_hash')
     if len(file_hash) != 64:
@@ -597,19 +601,19 @@ def run_module():
             module_results = "The Command '{0}' generated an error. \n{1}".format(cmd_string, e)
     else:
         module_results = "You Didn't Enter A Command!"
-    
+
     return '<pre>{0}</pre>'.format(str(module_results))
-    
+
 
 # Yara Rules
-@route('/yara', method='GET')   
-@route('/yara', method='POST')
+@app.route('/yara', method='GET')
+@app.route('/yara', method='POST')
 def yara_rules():
-    
+
     # Get list of Rules
     rule_path = 'data/yara'
     rule_list = os.listdir(rule_path)
-    
+
     # GET is for listing Rules
     if request.method == 'GET':
         action = request.query.action
@@ -634,7 +638,7 @@ def yara_rules():
             if rule_name.split('.')[-1] in ['yar', 'yara']:
                 os.remove(os.path.join(rule_path, rule_name))
             redirect('/yara?action=list')
-            
+
     # POST is for adding / updating Rules
     if request.method == 'POST':
         rule_name = request.forms.get('rule_name')
@@ -651,7 +655,7 @@ def yara_rules():
             return template('error.tpl', error="The File Name did not match the style 'name.yar'")
 
 # Cuckoo Functions
-@route('/cuckoo/submit', method='GET')
+@app.route('/cuckoo/submit', method='GET')
 def cuckoo_submit():
     # Get Query Strings
     project = request.query.project
@@ -668,7 +672,7 @@ def cuckoo_submit():
         path = get_sample_path(file_hash)
         __sessions__.new(path)
     except:
-        return '<span class="alert alert-danger">Invalid Submission</span>'   
+        return '<span class="alert alert-danger">Invalid Submission</span>'
 
     try:
         # Return URI For Existing Entry
@@ -680,13 +684,13 @@ def cuckoo_submit():
             return '<a href="{0}/submit/status/{1}" target="_blank"> Link To Cukoo Report</a>'.format(cuckoo_web, str(cuckoo_id))
     except Exception as e:
         return '<span class="alert alert-danger">Error Connecting To Cuckoo</span>'
-    
+
     # If it doesn't exist, submit it.
-    
+
     # Get the file data from viper
     file_data = open(__sessions__.current.file.path, 'rb').read()
     file_name = __sessions__.current.file.name
-   
+
     if file_data:
         # Submit file data to cuckoo
         uri = '{0}{1}'.format(cuckoo_api, '/tasks/create/file')
@@ -697,9 +701,9 @@ def cuckoo_submit():
             return '<a href="{0}/submit/status/{1}" target="_blank"> Link To Cukoo Report</a>'.format(cuckoo_web, str(cuckoo_id))
     else:
         return '<span class="alert alert-danger">Unable to Submit File</span>'
-    
+
 # Hex Viewer
-@route('/hex', method='POST')
+@app.route('/hex', method='POST')
 def hex_viewer():
     # get post data
     file_hash = request.forms.get('file_hash')
@@ -708,16 +712,16 @@ def hex_viewer():
     except:
         return '<p class="text-danger">Error Generating Request</p>'
     hex_length = 256
-    
+
     # get file path
     hex_path = get_sample_path(file_hash)
-    
+
     # create the command string
     hex_cmd = 'hd -s {0} -n {1} {2}'.format(hex_offset, hex_length, hex_path)
-    
+
     # get the output
     hex_string = commands.getoutput(hex_cmd)
-    
+
     # Format the data
     html_string = ''
     hex_rows = hex_string.split('\n')
@@ -734,12 +738,12 @@ def hex_viewer():
     return html_string
 
 # Cli Commands
-@route('/cli')
+@app.route('/cli')
 def cli_viewer():
     return template('cli.tpl')
 
 # VirusTotal Download
-@route('/virustotal', method='POST')
+@app.route('/virustotal', method='POST')
 def vt_download():
     vt_hash = request.forms.get('vt_hash')
     project = request.forms.get('project')
@@ -750,26 +754,26 @@ def vt_download():
         redirect('/file/{0}/{1}'.format(project, vt_hash))
     else:
         return template('error.tpl', error="Unable to download file {0}".format(module_results))
-    
-    
-# Run The web Server        
+
+
+# Run The web Server
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-H', '--host', help='Host to bind the API server on', default='localhost', action='store', required=False)
     parser.add_argument('-p', '--port', help='Port to bind the API server on', default=9090, action='store', required=False)
     args = parser.parse_args()
-    
+
     if args.port:
         web_port = args.port
-    
+
     bv = bottle.__version__.split('.')[1]
     if int(bv) < 12:
         print "Please Upgrade Bottle to the latest version 'sudo pip install --upgrade bottle'"
         sys.exit()
-    
+
     if not os.path.exists('projects'):
         os.mkdir('projects')
-    
+
     # Set template dir
     bottle.TEMPLATE_PATH.insert(0,'data/web')
-    run(host=args.host, port=web_port, reloader=True)
+    #app.run(host=args.host, port=web_port, reloader=True)

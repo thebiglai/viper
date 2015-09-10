@@ -8,6 +8,7 @@ import copy
 import argparse
 import tempfile
 import time
+import bottle
 
 from bottle import route, request, response, run
 from bottle import HTTPError
@@ -20,16 +21,18 @@ from viper.core.plugins import __modules__
 from viper.core.project import __project__
 from viper.core.ui.commands import Commands
 
+app = application = bottle.Bottle()
+
 db = Database()
 
 def jsonize(data):
     return json.dumps(data, sort_keys=False, indent=4)
 
-@route('/test', method='GET')
+@app.route('/test', method='GET')
 def test():
     return jsonize({'message' : 'test'})
 
-@route('/file/add', method='POST')
+@app.route('/file/add', method='POST')
 def add_file():
     tags = request.forms.get('tags')
     upload = request.files.get('file')
@@ -53,7 +56,7 @@ def add_file():
         response.status = 500
         return jsonize({'message':'Unable to store file'})
 
-@route('/file/get/<file_hash>', method='GET')
+@app.route('/file/get/<file_hash>', method='GET')
 def get_file(file_hash):
     key = ''
     if len(file_hash) == 32:
@@ -84,7 +87,7 @@ def get_file(file_hash):
 
     return data
 
-@route('/file/delete/<file_hash>', method='GET')
+@app.route('/file/delete/<file_hash>', method='GET')
 def delete_file(file_hash):
     success = False
     key = ''
@@ -102,7 +105,7 @@ def delete_file(file_hash):
     if not rows:
         response.code = 404
         return jsonize({'message':'File not found in the database'})
-	
+
     if rows:
         malware_id = rows[0].id
         path = get_sample_path(rows[0].sha256)
@@ -118,14 +121,14 @@ def delete_file(file_hash):
         return jsonize({'message':'File not found in file system'})
     else:
         success=os.remove(path)
-    
+
     if success:
         return jsonize({'message' : 'deleted'})
     else:
         response.code = 500
         return jsonize({'message':'Unable to delete file'})
 
-@route('/file/find', method='POST')
+@app.route('/file/find', method='POST')
 def find_file():
     def details(row):
         tags = []
@@ -160,7 +163,7 @@ def find_file():
         return jsonize({'message':'Invalid search term'})
 
     # Get the scope of the search
-    
+
     project_search = request.forms.get('project')
     projects = []
     results = {}
@@ -193,7 +196,7 @@ def find_file():
         results[project] = proj_results
     return jsonize(results)
 
-@route('/tags/list', method='GET')
+@app.route('/tags/list', method='GET')
 def list_tags():
     rows = db.list_tags()
 
@@ -202,8 +205,8 @@ def list_tags():
         results.append(row.tag)
 
     return jsonize(results)
-    
-@route('/file/tags/add', method='POST')
+
+@app.route('/file/tags/add', method='POST')
 def add_tags():
     tags = request.forms.get('tags')
     for entry in ['md5', 'sha256', 'ssdeep', 'tag', 'name', 'all','latest']:
@@ -213,22 +216,22 @@ def add_tags():
             break
     db = Database()
     rows = db.find(key=key, value=value)
-    
+
     if not rows:
         response.code = 404
         return jsonize({'message':'File not found in the database'})
-          
+
     for row in rows:
         malware_sha256=row.sha256
         db.add_tags(malware_sha256, tags)
 
     return jsonize({'message' : 'added'})
 
-@route('/modules/run', method='POST')
+@app.route('/modules/run', method='POST')
 def run_module():
     # Optional Project
     project = request.forms.get('project')
-    # Optional sha256   
+    # Optional sha256
     sha256 = request.forms.get('sha256')
     # Not Optional Command Line Args
     cmd_line = request.forms.get('cmdline')
@@ -243,12 +246,12 @@ def run_module():
     if not cmd_line:
         response.code = 404
         return jsonize({'message':'Invalid command line'})
-    results = module_cmdline(cmd_line, sha256)  
+    results = module_cmdline(cmd_line, sha256)
     __sessions__.close()
     return jsonize(results)
 
-            
-# this will allow complex command line parameters to be passed in via the web gui    
+
+# this will allow complex command line parameters to be passed in via the web gui
 def module_cmdline(cmd_line, sha256):
     json_data = ''
     cmd = Commands()
@@ -288,9 +291,9 @@ def module_cmdline(cmd_line, sha256):
         except:
             json_data += "{'message':'Unable to complete the command: {0}'.format(cmd_line)}"
     __sessions__.close()
-    return json_data 
- 
-@route('/projects/list', method='GET')
+    return json_data
+
+@app.route('/projects/list', method='GET')
 def list_projects():
     projects_path = os.path.join(os.getcwd(), 'projects')
     if not os.path.exists(projects_path):
@@ -308,4 +311,4 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--port', help='Port to bind the API server on', default=8080, action='store', required=False)
     args = parser.parse_args()
 
-    run(host=args.host, port=args.port)
+    app.run(host=args.host, port=args.port)

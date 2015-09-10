@@ -16,6 +16,7 @@ try:
 except ImportError:
     HAVE_YARA = False
 
+
 # TODO: need to add in the ability to tag
 # TODO: return json, api will return json with padding.
 class Eyara(Module):
@@ -56,8 +57,11 @@ class Eyara(Module):
     def scan(self):
         # Parse subprocess's output here
         def output_parser(out):
+            # The list of lists we return to the calling process
             rows = []
+            # Temp store for lists
             row = []
+            # break stdout up into a list so we can iterate
             parse = [x for x in out.split('\n') if x != '']
             for line in parse:
                 if line == '' or line == '\n':
@@ -74,6 +78,7 @@ class Eyara(Module):
             return rows
 
         def generate_json(out):
+            # TODO: group by parent file
             j = {}
             parse = [x for x in out.split('\n') if x != '']
             for line in parse:
@@ -87,11 +92,11 @@ class Eyara(Module):
                         val = [val.strip()]
                     j[key] = val
                 elif key == 'File Signature (MD5)':
-                    j[key] = val
+                    j[key] = val.strip()
                     self.jout['data'].append(j)
                     j = {}
                 else:
-                    j[key] = val
+                    j[key] = val.strip()
 
         db = Database()
         samples = []
