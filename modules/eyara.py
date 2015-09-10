@@ -1,6 +1,7 @@
 from __future__ import print_function
 
 import subprocess
+import json
 
 from viper.common.out import *
 from viper.common.abstracts import Module
@@ -15,16 +16,13 @@ try:
 except ImportError:
     HAVE_YARA = False
 
-
-# TODO: account for individual files
-# TODO: print prettier
-# TODO: print out matching regex
+# TODO: need to add in the ability to tag
 # TODO: return json, api will return json with padding.
 class Eyara(Module):
     cmd = 'eyara'
     description = 'Yara extended parser'
 
-    def __init__(self):
+    def __init__(self, json_out=True):
         super(Eyara, self).__init__()
         subparsers = self.parser.add_subparsers(dest='subname')
         parser_scan = subparsers.add_parser('scan', help='Scan files with Yara '
@@ -33,6 +31,8 @@ class Eyara(Module):
                                  help='Rule file. Default data/yara/index.yara')
         parser_scan.add_argument('-a', '--all', action='store_true',
                                  help='Scan all stored files.')
+        self.json_out = json_out
+        self.jout = {'data': []}
 
     def rule_index(self):
         """Used to generate a new index.yara each time its called.
@@ -54,7 +54,7 @@ class Eyara(Module):
         return 'data/yara/index.yara'
 
     def scan(self):
-        # Generate rule_index if a rule set isn't specifically called
+        # Parse subprocess's output here
         def output_parser(out):
             rows = []
             row = []
@@ -73,9 +73,30 @@ class Eyara(Module):
                     row.append(val)
             return rows
 
+        def generate_json(out):
+            j = {}
+            parse = [x for x in out.split('\n') if x != '']
+            for line in parse:
+                if line == '' or line == '\n':
+                    continue
+                key, val = line.split(':', 1)
+                if key == 'Yara':
+                    if ',' in val:
+                        val = [x.strip() for x in val.split(',')]
+                    else:
+                        val = [val.strip()]
+                    j[key] = val
+                elif key == 'File Signature (MD5)':
+                    j[key] = val
+                    self.jout['data'].append(j)
+                    j = {}
+                else:
+                    j[key] = val
+
         db = Database()
         samples = []
-
+        header = ['Rule', 'Type', 'File', 'Md5']
+        com = '/usr/local/bin/yextend {0} {1}'
         rules_file = self.args.rule if self.args.rule else self.rule_index()
 
         if not os.path.isfile(rules_file):
@@ -83,32 +104,39 @@ class Eyara(Module):
 
         if __sessions__.is_set() and not self.args.all:
             samples.append(__sessions__.current.file)
-        else:  # self.args.all is set or no session is open.
-            print_info('Scanning all files.')
+        else:
+            print_info('Scanning all files, this might take a bit')
             samples = db.find(key='all')
 
-        # Just sending noise to /dev/null
+        # sending noise to /dev/null
         NULL = open('/dev/null')
-        com = '/usr/local/bin/yextend {0} {1}'
+        # Main loop for scanning here
         for sample in samples:
             if not sample:
                 continue
+
             sample_path = get_sample_path(sample.sha256)
             if not sample_path:
                 continue
-            command = com.format(rules_file, sample_path)
+
             print_info("Scanning {0} ({1})".format(sample.name, sample.sha256))
-            header = ['Rule', 'Type', 'Child', 'Md5']
+            command = com.format(rules_file, sample_path)
             try:
                 p = subprocess.check_output([command], shell=True, stderr=NULL)
-                # Need to parse std out to get what we want
-                rows = output_parser(p)
-
-                if rows:
-                    print(table(header=header, rows=rows))
             except subprocess.CalledProcessError, e:
                 print_error('Unable to process file: {0}'.format(str(e)))
                 continue
+
+            if self.json_out:
+                output = generate_json(p)
+            else:
+                rows = output_parser(p)
+                if rows:
+                    print(table(header=header, rows=rows))
+
+        if self.json_out:
+            print(json.dumps(self.jout))
+
         # Don't forget to close this guy out
         NULL.close()
 
