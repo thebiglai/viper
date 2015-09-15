@@ -3,9 +3,9 @@ from __future__ import print_function
 import subprocess
 import json
 
+from viper.core.database import Database
 from viper.common.out import *
 from viper.common.abstracts import Module
-from viper.core.database import Database
 from viper.core.storage import get_sample_path
 from viper.core.session import __sessions__
 
@@ -23,7 +23,7 @@ class Eyara(Module):
     cmd = 'eyara'
     description = 'Yara extended parser'
 
-    def __init__(self, json_out=True):
+    def __init__(self, json_out=False):
         super(Eyara, self).__init__()
         subparsers = self.parser.add_subparsers(dest='subname')
         parser_scan = subparsers.add_parser('scan', help='Scan files with Yara '
@@ -32,6 +32,7 @@ class Eyara(Module):
                                  help='Rule file. Default data/yara/index.yara')
         parser_scan.add_argument('-a', '--all', action='store_true',
                                  help='Scan all stored files.')
+        parser_scan.add_argument('-t', '--tag', action='store_true')
         self.json_out = json_out
         self.jout = {'data': []}
 
@@ -54,6 +55,7 @@ class Eyara(Module):
 
         return 'data/yara/index.yara'
 
+
     def scan(self):
         # Parse subprocess's output here
         def output_parser(out):
@@ -64,9 +66,11 @@ class Eyara(Module):
             # break stdout up into a list so we can iterate
             parse = [x for x in out.split('\n') if x != '']
             for line in parse:
-                if line == '' or line == '\n':
+                if line == '' or line == '\n' or line.startswith('===='):
                     continue
                 key, val = line.split(':', 1)
+                if self.args.tag and val != '':
+                    db.add_tags(sample.sha256, val)
                 if key == 'Parent File Name':
                     continue
                 elif key == 'File Signature (MD5)':
@@ -82,10 +86,13 @@ class Eyara(Module):
             j = {}
             parse = [x for x in out.split('\n') if x != '']
             for line in parse:
-                if line == '' or line == '\n':
+                if line == '' or line == '\n' or line.startswith('===='):
                     continue
+
                 key, val = line.split(':', 1)
                 if key == 'Yara':
+                    if self.args.tag and val != '':
+                        db.add_tags(sample.sha256, val)
                     if ',' in val:
                         val = [x.strip() for x in val.split(',')]
                     else:
