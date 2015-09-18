@@ -69,7 +69,7 @@ class Eyara(Module):
                 if line == '' or line == '\n' or line.startswith('===='):
                     continue
                 key, val = line.split(':', 1)
-                if self.args.tag and val != '':
+                if key == 'Yara' and self.args.tag and val != '':
                     db.add_tags(sample.sha256, val)
                 if key == 'Parent File Name':
                     continue

@@ -8,11 +8,9 @@ sys.path.append('/opt/viper')
 
 from datetime import datetime
 from datetime import date, timedelta
-from viper.core.database import Database
 from viper.core.plugins import __modules__
 from viper.core.project import __project__
 from viper.core.ui.commands import Commands
-from modules.eyara import Eyara
 
 
 FMT = '%Y%m%d'
@@ -43,6 +41,7 @@ def populate(args):
 
 def eyara(args):
     # __project__.open(project) -> run eyara w db.find(key='all')
+    os.chdir(VIPER_HOME)
     project = PROJECT  # called from global scope
     __project__.open(project)
     module = __modules__['eyara']['obj']()
